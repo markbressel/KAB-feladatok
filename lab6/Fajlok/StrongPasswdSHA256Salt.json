@@ -1,0 +1,22 @@
+[
+    {
+        "name": "Szabo Peter",
+        "password": "ZN9UdtysT254Ho4s19X/66WEQ6ZM0d3RT1MxvYDwjUo=",
+        "salt": "9aSHVHC7BHs5AfLq82j4LqtJjQknaXmqvuqClHrzeA4="
+    },
+    {
+        "name": "Nagy Istvan",
+        "password": "73nNo/fS35ZSSqEbtPcHN0IgSrEdM/c4RtukbEpSnmQ=",
+        "salt": "xs+sCsW9tF/cgl7kewciDAe1YpipxfZyLkyfSix302I="
+    },
+    {
+        "name": "Szekely Piroska",
+        "password": "PMKQqoZlm9u42o/YC4b6HAABEC7zKFs3w1xrcuAu7mo=",
+        "salt": "798ZvLiXFccGa2YR3xggJfCnsM5xsyIly3dnYB4GcPM="
+    },
+    {
+        "name": "Laszlo Edit",
+        "password": "Ie+U9W+78gJ3qFFXPuefCYCxGsk7De9iud9D+wIsPAA=",
+        "salt": "G684iurhr6spukgQPee9iXuNFBJKd20nlhJQ+aRD0OY="
+    }
+]
