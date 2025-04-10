@@ -1,110 +1,94 @@
 import numpy as np
-import sys
-import os
-from pathlib import Path
 
-def read_key_matrix(key_file):
-    """Beolvassa a mátrix méretét és elemeit a fájlból"""
-    with open(key_file, 'r') as f:
-        lines = [line.strip() for line in f.readlines() if line.strip()]
-        
-        # Első sor tartalmazza a mátrix méretét
-        n = int(lines[0].split()[0])
-        
-        # Mátrix elemek beolvasása
-        matrix = []
-        for line in lines[1:n+1]:
-            row = list(map(int, line.split()))
-            matrix.append(row)
-            
-        return np.array(matrix)
+BLOCK_SIZE = 16  # CBC mód blokkmérete
+HILL_BLOCK_SIZE = 4  # Hill titkosítás belső blokkmérete (4x4 mátrixhoz)
+MOD = 256
 
-def modinv_matrix(matrix, mod=256):
-    """Kiszámolja a mátrix inverzét modulo 256"""
-    det = int(round(np.linalg.det(matrix)))
-    try:
-        det_inv = pow(det, -1, mod)
-    except ValueError:
-        raise ValueError("A mátrix nem invertálható mod 256")
+# Mátrix beolvasása fájlból
+def read_key_matrix(path):
+    with open(path, 'r') as f:
+        lines = [line.strip() for line in f if line.strip()]
     
-    adjugate = np.round(det * np.linalg.inv(matrix)).astype(int)
-    return (det_inv * adjugate) % mod
+    matrix = [list(map(int, line.split())) for line in lines]
 
-def hill_decrypt_block(cipher_block, inv_key_matrix):
-    """Egy blokk visszafejtése Hill titkosítással"""
-    cipher_vec = np.array([byte for byte in cipher_block])
-    plain_vec = np.dot(inv_key_matrix, cipher_vec) % 256
-    return bytes([int(x) for x in plain_vec])
+    # Ellenőrzés: legyen 4x4
+    if len(matrix) != 4 or any(len(row) != 4 for row in matrix):
+        raise ValueError("A kulcs mátrixnak 4x4-esnek kell lennie.")
+    
+    return np.array(matrix, dtype=int)
 
-def cbc_hill_decrypt(input_file, output_file, key_file):
-    """Fő visszafejtő függvény CBC módban"""
-    try:
-        # Mátrix beolvasása
-        key_matrix = read_key_matrix(key_file)
-        block_size = len(key_matrix)
+# Hill kulcs inverze mod 256 alatt
+def modinv_matrix(matrix, mod):
+    det = int(round(np.linalg.det(matrix))) % mod
+    if det == 0 or np.gcd(det, mod) != 1:
+        raise ValueError("A mátrix nem invertálható modulo 256 alatt.")
+    
+    det_inv = pow(det, -1, mod)
+    matrix_adj = np.round(det * np.linalg.inv(matrix)).astype(int) % mod
+    return (det_inv * matrix_adj) % mod
+
+# Egy 4 bájtos blokk visszafejtése Hill módszerrel
+def hill_decrypt_block(block, inv_key):
+    if len(block) != HILL_BLOCK_SIZE:
+        raise ValueError(f"A Hill blokk mérete {len(block)} byte, de {HILL_BLOCK_SIZE} byte szükséges.")
+    
+    vec = np.array(list(block), dtype=int).reshape(4, 1)  # 4x1 vektor
+    res = np.dot(inv_key, vec) % MOD
+    return res.flatten().astype(np.uint8).tobytes()
+
+# CBC mód visszafejtés 16 bájtos blokkokkal, Hill 4 bájtos alblokkjaival
+def decrypt_hill_cbc(ciphertext, key_matrix, iv):
+    if len(iv) != BLOCK_SIZE:
+        raise ValueError(f"Az IV hossza {len(iv)} byte, de {BLOCK_SIZE} byte szükséges.")
+    
+    inv_key = modinv_matrix(key_matrix, MOD)
+    decrypted = b''
+
+    prev = iv
+    for i in range(0, len(ciphertext), BLOCK_SIZE):
+        block = ciphertext[i:i+BLOCK_SIZE]
+        if len(block) < BLOCK_SIZE:
+            block += b'\x00' * (BLOCK_SIZE - len(block))  # Padding, ha szükséges
         
-        # Mátrix inverz kiszámolása
-        inv_key_matrix = modinv_matrix(key_matrix)
+        decrypted_block = b''
+        # 16 bájtos blokkot 4 db 4 bájtos alblokkra bontunk
+        for j in range(0, BLOCK_SIZE, HILL_BLOCK_SIZE):
+            sub_block = block[j:j+HILL_BLOCK_SIZE]
+            decrypted_sub_block = hill_decrypt_block(sub_block, inv_key)
+            decrypted_block += decrypted_sub_block
+        
+        # XOR az előző blokkal (CBC mód)
+        plain_block = bytes(a ^ b for a, b in zip(decrypted_block, prev))
+        decrypted += plain_block
+        prev = block
+    
+    return decrypted
+
+# Főprogram
+def main():
+    try:
+        # Kulcs beolvasása
+        key_matrix = read_key_matrix(r"lab5\Fajlok\keyHillCBC.txt")
         
         # Titkosított fájl beolvasása
-        with open(input_file, 'rb') as f:
-            cipher_data = f.read()
+        with open(r"lab5\Fajlok\cryptHillCBC_Ikrek", "rb") as f:
+            data = f.read()
+
+        # IV az utolsó BLOCK_SIZE bájt
+        iv = data[-BLOCK_SIZE:]
+        ciphertext = data[:-BLOCK_SIZE]
+
+        # Visszafejtés
+        plaintext = decrypt_hill_cbc(ciphertext, key_matrix, iv)
+
+        # Eredmény mentése
+        with open("visszafejtett.jpg", "wb") as f:
+            f.write(plaintext)
         
-        # IV kivonása az utolsó blokkból
-        iv = cipher_data[-block_size:]
-        cipher_blocks = cipher_data[:-block_size]
-        
-        # Blokkokra bontás
-        blocks = [cipher_blocks[i:i+block_size] for i in range(0, len(cipher_blocks), block_size)]
-        
-        # CBC visszafejtés
-        decrypted_data = bytearray()
-        prev_block = iv
-        
-        for block in reversed(blocks):
-            if len(block) < block_size:
-                block = block.ljust(block_size, b'\x00')
-            
-            decrypted_block = hill_decrypt_block(block, inv_key_matrix)
-            plain_block = bytes([d ^ p for d, p in zip(decrypted_block, prev_block)])
-            decrypted_data.extend(plain_block)
-            prev_block = block
-        
-        # Eredeti sorrend visszaállítása és fájlba írás
-        with open(output_file, 'wb') as f:
-            f.write(bytes(reversed(decrypted_data)))
-            
-        print(f"Sikeres visszafejtés! Eredmény mentve ide: {output_file}")
-        
-        # Ellenőrizzük, hogy JPG-e a kimenet
-        with open(output_file, 'rb') as f:
-            magic = f.read(3)
-            if magic != b'\xff\xd8\xff':
-                print("Figyelem: A kimenet nem tűnik érvényes JPG fájlnak!")
-            else:
-                print("A kimenet érvényes JPG fájlnak tűnik.")
-                
+        print("A visszafejtés sikeresen megtörtént, az eredmény 'visszafejtett.jpg' néven mentve.")
+    
     except Exception as e:
         print(f"Hiba történt: {str(e)}")
-        sys.exit(1)
 
 if __name__ == "__main__":
-    # Elérési utak kezelése
-    base_dir = Path('lab5/Fajlok')
-    
-    input_file = base_dir / 'cryptHillCBC_Ikrek'
-    output_file = base_dir / 'decrypted.jpg'
-    key_file = base_dir / 'keyHillCBC.txt'
-    
-    # Ellenőrizzük a fájlokat
-    if not input_file.exists():
-        print(f"Hiba: A bemeneti fájl nem található: {input_file}")
-        sys.exit(1)
-        
-    if not key_file.exists():
-        print(f"Hiba: A kulcsfájl nem található: {key_file}")
-        sys.exit(1)
-    
-    # Visszafejtés indítása
-    print("Visszafejtés indítása...")
-    cbc_hill_decrypt(str(input_file), str(output_file), str(key_file))
+    main()
